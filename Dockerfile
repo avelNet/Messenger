@@ -1,4 +1,4 @@
-FROM rust:1.76-slim as builder
+FROM rust:latest as builder
 RUN apt-get update && apt-get install -y pkg-config libssl-dev libsqlite3-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY messenger/server/Cargo.toml messenger/server/Cargo.lock* ./
