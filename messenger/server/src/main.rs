@@ -7,6 +7,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use base64::Engine as _;
 use dashmap::DashMap;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -131,13 +132,13 @@ async fn upload_avatar(State(s): State<AppState>, mut multipart: Multipart) -> (
     let mut image_data: Option<Vec<u8>> = None;
     let mut mime = String::from("image/jpeg");
 
-    while let Ok(Some(field)) = multipart.next_field().await {
+    while let Ok(Some(mut field)) = multipart.next_field().await {
         let name = field.name().unwrap_or("").to_string();
         if name == "user_id" {
             user_id = field.text().await.unwrap_or_default();
         } else if name == "avatar" {
             mime = field.content_type().unwrap_or("image/jpeg").to_string();
-            let data = field.bytes().await.unwrap_or_default();
+            let data: bytes::Bytes = field.bytes().await.unwrap_or_default();
             if data.len() > 2 * 1024 * 1024 {
                 return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "Файл слишком большой (макс 2MB)"})));
             }
@@ -256,7 +257,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                 if let Some(ref from_id) = authed_id {
                     let user = db::get_user(&state.db, from_id).await.ok().flatten().unwrap_or_else(|| db::User {
                         id: from_id.clone(), username: String::new(), password_hash: String::new(),
-                        display_name: String::new(), bio: String::new(),
+                        display_name: String::new(), bio: String::new(), avatar: String::new(),
                         avatar_color: "#4f8ef7".into(), last_seen: 0, created_at: 0,
                     });
                     let timestamp = chrono::Utc::now().timestamp();
