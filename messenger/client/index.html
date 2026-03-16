@@ -1,60 +1,128 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="theme-color" content="#1a1a2e" />
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="theme-color" content="#0a0a0f"/>
   <title>Messenger</title>
-  <link rel="manifest" href="manifest.json" />
-  <link rel="stylesheet" href="style.css" />
+  <link rel="manifest" href="manifest.json"/>
+  <link rel="stylesheet" href="style.css"/>
 </head>
 <body>
 
-<!-- Экран регистрации -->
+<!-- Auth -->
 <div id="screen-auth" class="screen">
-  <div class="auth-box">
+  <div class="auth-wrap">
+    <div class="auth-logo">✦</div>
     <h1>Messenger</h1>
-    <p class="subtitle">Локальный мессенджер</p>
-    <input id="input-username" type="text" placeholder="Ваше имя" maxlength="32" />
-    <button id="btn-register">Войти / Зарегистрироваться</button>
+    <div class="auth-tabs">
+      <button class="tab-btn active" data-tab="login">Войти</button>
+      <button class="tab-btn" data-tab="register">Регистрация</button>
+    </div>
+    <div id="tab-login" class="tab-content">
+      <input id="login-username" type="text" placeholder="@username" autocomplete="username"/>
+      <input id="login-password" type="password" placeholder="Пароль" autocomplete="current-password"/>
+      <button id="btn-login" class="btn-primary">Войти</button>
+    </div>
+    <div id="tab-register" class="tab-content hidden">
+      <input id="reg-display-name" type="text" placeholder="Ваше имя" maxlength="32"/>
+      <input id="reg-password" type="password" placeholder="Пароль (мин. 4 символа)" autocomplete="new-password"/>
+      <button id="btn-register" class="btn-primary">Далее →</button>
+    </div>
     <p id="auth-error" class="error"></p>
   </div>
 </div>
 
-<!-- Основной экран -->
-<div id="screen-main" class="screen hidden">
-  <div class="sidebar">
-    <div class="sidebar-header">
-      <div class="my-info">
-        <span id="my-username"></span>
-        <span class="my-id-label">Ваш ID: <strong id="my-id"></strong></span>
-      </div>
-      <button id="btn-add-contact" title="Добавить контакт">+</button>
+<!-- Username setup (шаг 2 регистрации) -->
+<div id="screen-username" class="screen hidden">
+  <div class="auth-wrap">
+    <div class="auth-logo">✦</div>
+    <h1>Выберите username</h1>
+    <p class="auth-hint">По нему вас смогут найти другие пользователи</p>
+    <div class="username-input-wrap">
+      <span class="username-at">@</span>
+      <input id="setup-username" type="text" placeholder="username" maxlength="32" autocomplete="off" spellcheck="false"/>
     </div>
-    <div id="contacts-list" class="contacts-list"></div>
+    <p id="username-check" class="username-check"></p>
+    <button id="btn-confirm-username" class="btn-primary" disabled>Готово</button>
+    <p id="username-error" class="error"></p>
+  </div>
+</div>
+
+<!-- Main -->
+<div id="screen-main" class="screen hidden">
+  <div class="sidebar" id="sidebar">
+    <div class="sidebar-top">
+      <div class="me-avatar" id="me-avatar"></div>
+      <div class="me-info">
+        <span id="my-display-name"></span>
+        <span class="me-id">ID: <strong id="my-id"></strong></span>
+      </div>
+      <button id="btn-profile" class="icon-btn" title="Профиль">⚙</button>
+      <button id="btn-add" class="icon-btn add-btn" title="Добавить контакт">+</button>
+    </div>
+    <div id="contacts-list"></div>
   </div>
 
-  <div class="chat-area">
-    <div id="chat-header" class="chat-header">
-      <span id="chat-title">Выберите контакт</span>
-      <span id="chat-status"></span>
+  <div class="chat" id="chat-panel">
+    <div class="chat-top" id="chat-top">
+      <button id="btn-back" class="icon-btn back-btn">←</button>
+      <div class="chat-peer-avatar" id="chat-peer-avatar"></div>
+      <div class="chat-peer-info">
+        <span id="chat-title">Выберите контакт</span>
+        <span id="chat-status" class="chat-status"></span>
+      </div>
     </div>
     <div id="messages" class="messages"></div>
-    <div class="input-area">
-      <input id="msg-input" type="text" placeholder="Сообщение..." disabled />
-      <button id="btn-send" disabled>→</button>
+    <div class="composer">
+      <input id="msg-input" type="text" placeholder="Сообщение..." disabled autocomplete="off"/>
+      <button id="btn-send" class="send-btn" disabled>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+        </svg>
+      </button>
     </div>
   </div>
 </div>
 
-<!-- Модалка добавления контакта -->
+<!-- Profile modal -->
+<div id="modal-profile" class="modal hidden">
+  <div class="modal-box">
+    <h3>Профиль</h3>
+    <div class="avatar-picker">
+      <div id="profile-avatar-preview" class="avatar-lg"></div>
+      <div class="color-swatches" id="color-swatches"></div>
+    </div>
+    <input id="profile-display-name" type="text" placeholder="Отображаемое имя" maxlength="32"/>
+    <textarea id="profile-bio" placeholder="О себе..." maxlength="120" rows="3"></textarea>
+    <div class="modal-btns">
+      <button id="btn-save-profile" class="btn-primary">Сохранить</button>
+      <button id="btn-close-profile" class="btn-secondary">Отмена</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add contact modal -->
 <div id="modal-add" class="modal hidden">
   <div class="modal-box">
     <h3>Добавить контакт</h3>
-    <input id="input-contact-id" type="text" placeholder="ID пользователя" maxlength="8" />
-    <div class="modal-buttons">
-      <button id="btn-confirm-add">Добавить</button>
-      <button id="btn-cancel-add" class="secondary">Отмена</button>
+    <div class="search-tabs">
+      <button class="stab active" data-stab="username">По @username</button>
+      <button class="stab" data-stab="id">По ID</button>
+    </div>
+    <div id="stab-username">
+      <div class="username-input-wrap">
+        <span class="username-at">@</span>
+        <input id="search-username-input" type="text" placeholder="username" maxlength="32" autocomplete="off"/>
+      </div>
+    </div>
+    <div id="stab-id" class="hidden">
+      <input id="input-contact-id" type="text" placeholder="ID (8 символов)" maxlength="8" autocomplete="off"/>
+    </div>
+    <div id="found-user-preview" class="found-user hidden"></div>
+    <div class="modal-btns">
+      <button id="btn-confirm-add" class="btn-primary">Добавить</button>
+      <button id="btn-cancel-add" class="btn-secondary">Отмена</button>
     </div>
     <p id="add-error" class="error"></p>
   </div>
@@ -63,4 +131,3 @@
 <script src="app.js"></script>
 </body>
 </html>
-""
