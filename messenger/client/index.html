@@ -67,8 +67,8 @@
   <div class="chat" id="chat-panel">
     <div class="chat-top" id="chat-top">
       <button id="btn-back" class="icon-btn back-btn">←</button>
-      <div class="chat-peer-avatar" id="chat-peer-avatar"></div>
-      <div class="chat-peer-info">
+      <div class="chat-peer-avatar" id="chat-peer-avatar" style="cursor:pointer" title="Профиль"></div>
+      <div class="chat-peer-info" style="cursor:pointer" id="chat-peer-info-click">
         <span id="chat-title">Выберите контакт</span>
         <span id="chat-status" class="chat-status"></span>
       </div>
@@ -85,20 +85,71 @@
   </div>
 </div>
 
-<!-- Profile modal -->
+<!-- Profile modal (свой) -->
 <div id="modal-profile" class="modal hidden">
-  <div class="modal-box">
-    <h3>Профиль</h3>
-    <div class="avatar-picker">
-      <div id="profile-avatar-preview" class="avatar-lg"></div>
-      <div class="color-swatches" id="color-swatches"></div>
+  <div class="modal-box profile-box">
+    <div class="profile-header">
+      <h3>Мой профиль</h3>
+      <button id="btn-close-profile" class="icon-btn">✕</button>
     </div>
-    <input id="profile-display-name" type="text" placeholder="Отображаемое имя" maxlength="32"/>
-    <textarea id="profile-bio" placeholder="О себе..." maxlength="120" rows="3"></textarea>
-    <div class="modal-btns">
-      <button id="btn-save-profile" class="btn-primary">Сохранить</button>
-      <button id="btn-close-profile" class="btn-secondary">Отмена</button>
+
+    <div class="avatar-upload-wrap">
+      <div id="profile-avatar-preview" class="avatar-lg" style="cursor:pointer" title="Нажмите чтобы загрузить фото"></div>
+      <input id="avatar-file-input" type="file" accept="image/*" style="display:none"/>
+      <span class="avatar-upload-hint">Нажмите на аватар чтобы изменить</span>
     </div>
+
+    <div class="color-swatches" id="color-swatches"></div>
+
+    <div class="profile-field">
+      <label>Имя</label>
+      <input id="profile-display-name" type="text" maxlength="32"/>
+    </div>
+    <div class="profile-field">
+      <label>@username</label>
+      <input id="profile-username-show" type="text" disabled/>
+    </div>
+    <div class="profile-field">
+      <label>О себе</label>
+      <textarea id="profile-bio" maxlength="120" rows="2"></textarea>
+    </div>
+    <div class="profile-field">
+      <label>ID</label>
+      <div class="copy-field">
+        <span id="profile-id-show"></span>
+        <button id="btn-copy-id" class="copy-btn">Копировать</button>
+      </div>
+    </div>
+
+    <button id="btn-save-profile" class="btn-primary">Сохранить</button>
+
+    <div class="divider"></div>
+
+    <div class="profile-field">
+      <label>Сменить пароль</label>
+      <input id="old-password" type="password" placeholder="Текущий пароль"/>
+      <input id="new-password" type="password" placeholder="Новый пароль (мин. 4)"/>
+      <input id="new-password2" type="password" placeholder="Повторите новый пароль"/>
+    </div>
+    <button id="btn-change-password" class="btn-secondary-full">Сменить пароль</button>
+    <p id="password-msg" class="error"></p>
+  </div>
+</div>
+
+<!-- Чужой профиль -->
+<div id="modal-peer-profile" class="modal hidden">
+  <div class="modal-box profile-box">
+    <div class="profile-header">
+      <h3>Профиль</h3>
+      <button id="btn-close-peer-profile" class="icon-btn">✕</button>
+    </div>
+    <div class="peer-profile-avatar-wrap">
+      <div id="peer-avatar" class="avatar-lg"></div>
+    </div>
+    <div class="peer-profile-name" id="peer-display-name"></div>
+    <div class="peer-profile-username" id="peer-username"></div>
+    <div class="peer-profile-bio" id="peer-bio"></div>
+    <div class="peer-profile-lastseen" id="peer-lastseen"></div>
   </div>
 </div>
 

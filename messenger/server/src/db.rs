@@ -23,6 +23,7 @@ pub async fn init(database_url: &str) -> SqlitePool {
             display_name TEXT NOT NULL,
             bio TEXT NOT NULL DEFAULT '',
             avatar_color TEXT NOT NULL DEFAULT '#4f8ef7',
+            avatar TEXT NOT NULL DEFAULT '',
             last_seen INTEGER NOT NULL DEFAULT 0,
             created_at INTEGER NOT NULL
         )",
@@ -60,6 +61,7 @@ pub struct User {
     pub display_name: String,
     pub bio: String,
     pub avatar_color: String,
+    pub avatar: String,
     pub last_seen: i64,
     pub created_at: i64,
 }
@@ -77,7 +79,7 @@ pub struct StoredMessage {
 
 pub async fn create_user(pool: &SqlitePool, id: &str, username: &str, password_hash: &str) -> anyhow::Result<()> {
     let now = chrono::Utc::now().timestamp();
-    sqlx::query("INSERT INTO users (id, username, password_hash, display_name, bio, avatar_color, last_seen, created_at) VALUES (?, ?, ?, ?, '', '#4f8ef7', ?, ?)")
+    sqlx::query("INSERT INTO users (id, username, password_hash, display_name, bio, avatar_color, avatar, last_seen, created_at) VALUES (?, ?, ?, ?, '', '#4f8ef7', '', ?, ?)")
         .bind(id).bind(username).bind(password_hash).bind(username).bind(now).bind(now)
         .execute(pool).await?;
     Ok(())
@@ -97,6 +99,18 @@ pub async fn update_profile(pool: &SqlitePool, id: &str, display_name: &str, bio
     sqlx::query("UPDATE users SET display_name = ?, bio = ?, avatar_color = ? WHERE id = ?")
         .bind(display_name).bind(bio).bind(avatar_color).bind(id)
         .execute(pool).await?;
+    Ok(())
+}
+
+pub async fn update_avatar(pool: &SqlitePool, id: &str, avatar: &str) -> anyhow::Result<()> {
+    sqlx::query("UPDATE users SET avatar = ? WHERE id = ?")
+        .bind(avatar).bind(id).execute(pool).await?;
+    Ok(())
+}
+
+pub async fn update_password(pool: &SqlitePool, id: &str, hash: &str) -> anyhow::Result<()> {
+    sqlx::query("UPDATE users SET password_hash = ? WHERE id = ?")
+        .bind(hash).bind(id).execute(pool).await?;
     Ok(())
 }
 

@@ -157,3 +157,31 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .found-user-info{display:flex;flex-direction:column;gap:2px}
 .found-user-name{font-size:.9rem;font-weight:500}
 .found-user-username{font-size:.78rem;color:var(--text2)}
+
+/* Profile modal */
+.profile-box{max-height:90dvh;overflow-y:auto;width:360px}
+.profile-header{display:flex;align-items:center;justify-content:space-between}
+.avatar-upload-wrap{display:flex;flex-direction:column;align-items:center;gap:6px}
+.avatar-upload-hint{font-size:.75rem;color:var(--text3)}
+.profile-field{display:flex;flex-direction:column;gap:6px}
+.profile-field label{font-size:.78rem;color:var(--text2);font-weight:500}
+.profile-field input,.profile-field textarea{padding:9px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:.88rem;outline:none;font-family:inherit;resize:none}
+.profile-field input:focus,.profile-field textarea:focus{border-color:var(--accent)}
+.profile-field input:disabled{opacity:.5;cursor:default}
+.copy-field{display:flex;align-items:center;gap:8px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px}
+.copy-field span{flex:1;font-family:monospace;font-size:.85rem;color:var(--accent)}
+.copy-btn{border:none;background:transparent;color:var(--text2);cursor:pointer;font-size:.78rem;padding:2px 6px;border-radius:4px}
+.copy-btn:hover{color:var(--text)}
+.divider{height:1px;background:var(--border);margin:4px 0}
+.btn-secondary-full{width:100%;padding:10px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);cursor:pointer;font-size:.88rem}
+.btn-secondary-full:hover{border-color:var(--accent)}
+
+/* Peer profile */
+.peer-profile-avatar-wrap{display:flex;justify-content:center}
+.peer-profile-name{text-align:center;font-size:1.15rem;font-weight:700}
+.peer-profile-username{text-align:center;font-size:.85rem;color:var(--accent)}
+.peer-profile-bio{text-align:center;font-size:.88rem;color:var(--text2);min-height:1em}
+.peer-profile-lastseen{text-align:center;font-size:.78rem;color:var(--text3)}
+
+/* Avatar image */
+.avatar img,.avatar-lg img,.me-avatar img,.chat-peer-avatar img{width:100%;height:100%;border-radius:50%;object-fit:cover}

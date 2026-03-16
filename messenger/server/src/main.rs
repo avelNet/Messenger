@@ -1,7 +1,7 @@
 mod db;
 
 use axum::{
-    extract::{ws::{Message, WebSocket, WebSocketUpgrade}, Path, Query, State},
+    extract::{ws::{Message, WebSocket, WebSocketUpgrade}, Multipart, Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
@@ -75,7 +75,8 @@ fn user_json(u: &db::User) -> serde_json::Value {
     serde_json::json!({
         "id": u.id, "username": u.username,
         "display_name": u.display_name, "bio": u.bio,
-        "avatar_color": u.avatar_color, "last_seen": u.last_seen
+        "avatar_color": u.avatar_color, "avatar": u.avatar,
+        "last_seen": u.last_seen
     })
 }
 
@@ -100,6 +101,60 @@ async fn update_profile(State(s): State<AppState>, Json(req): Json<UpdateProfile
     match db::update_profile(&s.db, &req.id, &req.display_name, &req.bio, &req.avatar_color).await {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+#[derive(Deserialize)]
+struct ChangePasswordRequest { id: String, old_password: String, new_password: String }
+
+async fn change_password(State(s): State<AppState>, Json(req): Json<ChangePasswordRequest>) -> (StatusCode, Json<serde_json::Value>) {
+    match db::get_user(&s.db, &req.id).await.ok().flatten() {
+        Some(user) => {
+            if !bcrypt::verify(&req.old_password, &user.password_hash).unwrap_or(false) {
+                return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Неверный пароль"})));
+            }
+            if req.new_password.len() < 4 {
+                return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "Пароль слишком короткий"})));
+            }
+            let hash = bcrypt::hash(&req.new_password, 10).unwrap();
+            match db::update_password(&s.db, &req.id, &hash).await {
+                Ok(_) => (StatusCode::OK, Json(serde_json::json!({"ok": true}))),
+                Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "DB error"}))),
+            }
+        }
+        None => (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "User not found"}))),
+    }
+}
+
+async fn upload_avatar(State(s): State<AppState>, mut multipart: Multipart) -> (StatusCode, Json<serde_json::Value>) {
+    let mut user_id = String::new();
+    let mut image_data: Option<Vec<u8>> = None;
+    let mut mime = String::from("image/jpeg");
+
+    while let Ok(Some(field)) = multipart.next_field().await {
+        let name = field.name().unwrap_or("").to_string();
+        if name == "user_id" {
+            user_id = field.text().await.unwrap_or_default();
+        } else if name == "avatar" {
+            mime = field.content_type().unwrap_or("image/jpeg").to_string();
+            let data = field.bytes().await.unwrap_or_default();
+            if data.len() > 2 * 1024 * 1024 {
+                return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "Файл слишком большой (макс 2MB)"})));
+            }
+            image_data = Some(data.to_vec());
+        }
+    }
+
+    if user_id.is_empty() || image_data.is_none() {
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "Missing fields"})));
+    }
+
+    let encoded = base64::engine::general_purpose::STANDARD.encode(image_data.unwrap());
+    let data_url = format!("data:{};base64,{}", mime, encoded);
+
+    match db::update_avatar(&s.db, &user_id, &data_url).await {
+        Ok(_) => (StatusCode::OK, Json(serde_json::json!({"avatar": data_url}))),
+        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "DB error"}))),
     }
 }
 
@@ -308,6 +363,8 @@ async fn main() {
         .route("/user/:id", get(lookup))
         .route("/username/:username", get(lookup_by_username))
         .route("/profile", post(update_profile))
+        .route("/password", post(change_password))
+        .route("/avatar", post(upload_avatar))
         .route("/history/:user_id", get(history))
         .route("/push/subscribe", post(save_push_sub))
         .route("/ws", get(ws_handler))

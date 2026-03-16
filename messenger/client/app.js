@@ -9,7 +9,7 @@ const store = {
 };
 
 let state = {
-  userId: null, username: null, displayName: null, avatarColor: '#6c63ff',
+  userId: null, username: null, displayName: null, avatarColor: '#6c63ff', avatar: '',
   contacts: {}, messages: {}, activeContact: null, ws: null, wsReady: false,
   typingTimers: {}, pendingRegData: null,
 };
@@ -17,8 +17,12 @@ let state = {
 // --- Init ---
 window.addEventListener('DOMContentLoaded', () => {
   const saved = store.get('user');
-  if (saved?.id) {
-    Object.assign(state, saved);
+  if (saved?.userId) {
+    state.userId = saved.userId;
+    state.username = saved.username;
+    state.displayName = saved.displayName;
+    state.avatarColor = saved.avatarColor || '#6c63ff';
+    state.avatar = saved.avatar || '';
     state.contacts = store.get('contacts') || {};
     state.messages = store.get('messages') || {};
     showMain();
@@ -54,8 +58,7 @@ function renderMe() {
   document.getElementById('my-display-name').textContent = state.displayName || state.username;
   document.getElementById('my-id').textContent = state.userId;
   const av = document.getElementById('me-avatar');
-  av.style.background = state.avatarColor;
-  av.textContent = (state.displayName || state.username || '?')[0].toUpperCase();
+  setAvatarEl(av, state.displayName || state.username, state.avatarColor, state.avatar || '');
 }
 
 // --- Auth ---
@@ -121,7 +124,12 @@ function saveUser(data) {
   state.username = data.username;
   state.displayName = data.display_name || data.username;
   state.avatarColor = data.avatar_color || '#6c63ff';
-  store.set('user', { userId: state.userId, username: state.username, displayName: state.displayName, avatarColor: state.avatarColor });
+  state.avatar = data.avatar || '';
+  store.set('user', {
+    userId: state.userId, username: state.username,
+    displayName: state.displayName, avatarColor: state.avatarColor,
+    avatar: state.avatar,
+  });
 }
 
 // --- Username availability check ---
@@ -176,12 +184,26 @@ function handleWsMessage(msg) {
     case 'authed':
       state.wsReady = true;
       setupPush();
+      // Загрузить историю для всех контактов
+      Object.keys(state.contacts).forEach(cid => loadHistory(cid));
       break;
     case 'incoming': {
       const { id, from, from_name, from_color, text, timestamp } = msg;
       if (!state.contacts[from]) {
-        state.contacts[from] = { id: from, username: '', displayName: from_name, avatarColor: from_color || '#6c63ff', online: true };
-        saveContacts(); renderContacts();
+        // Загрузить полный профиль
+        fetch(`${SERVER_URL}/user/${from}`).then(r => r.json()).then(u => {
+          state.contacts[from] = {
+            id: from, username: u.username,
+            displayName: u.display_name || from_name,
+            avatarColor: u.avatar_color || from_color || '#6c63ff',
+            avatar: u.avatar || '',
+            online: true,
+          };
+          saveContacts(); renderContacts();
+        }).catch(() => {
+          state.contacts[from] = { id: from, username: '', displayName: from_name, avatarColor: from_color || '#6c63ff', avatar: '', online: true };
+          saveContacts(); renderContacts();
+        });
       }
       pushMessage(from, { id, from, text, timestamp, out: false, status: 'delivered' });
       // Отправить read если чат открыт
@@ -313,7 +335,7 @@ function renderContacts() {
     el.className = 'contact-item' + (state.activeContact === c.id ? ' active' : '');
     el.innerHTML = `
       <div class="avatar" style="background:${c.avatarColor||'#6c63ff'}">
-        ${(c.displayName||c.username||'?')[0].toUpperCase()}
+        ${c.avatar ? `<img src="${c.avatar}" alt=""/>` : (c.displayName||c.username||'?')[0].toUpperCase()}
         <span class="status-dot ${c.online ? 'online' : ''}"></span>
       </div>
       <div class="contact-info">
@@ -335,7 +357,8 @@ function openChat(contactId) {
   updateChatStatus(contactId);
   const pav = document.getElementById('chat-peer-avatar');
   pav.style.background = c.avatarColor || '#6c63ff';
-  pav.textContent = (c.displayName || c.username || '?')[0].toUpperCase();
+  if (c.avatar) pav.innerHTML = `<img src="${c.avatar}" alt=""/>`;
+  else pav.textContent = (c.displayName || c.username || '?')[0].toUpperCase();
   document.getElementById('msg-input').disabled = false;
   document.getElementById('btn-send').disabled = false;
   renderMessages(contactId);
@@ -431,16 +454,27 @@ async function loadHistory(contactId) {
     const res = await fetch(`${SERVER_URL}/history/${state.userId}?with=${contactId}`);
     if (!res.ok) return;
     const msgs = await res.json();
-    const existing = new Set((state.messages[contactId] || []).map(m => m.id).filter(Boolean));
-    const newMsgs = msgs.filter(m => !existing.has(m.id)).map(m => ({
-      id: m.id, from: m.from_id, text: m.text, timestamp: m.timestamp,
-      out: m.from_id === state.userId,
-      status: m.read_at > 0 ? 'read' : (m.delivered ? 'delivered' : 'sent'),
-    }));
-    if (newMsgs.length) {
-      state.messages[contactId] = [...newMsgs, ...(state.messages[contactId] || [])].sort((a, b) => a.timestamp - b.timestamp);
+    const existing = new Map((state.messages[contactId] || []).map(m => [m.id, m]));
+    let changed = false;
+    msgs.forEach(m => {
+      const status = m.read_at > 0 ? 'read' : (m.delivered ? 'delivered' : 'sent');
+      if (existing.has(m.id)) {
+        // Обновить статус если изменился
+        const local = existing.get(m.id);
+        if (local.status !== status) { local.status = status; changed = true; }
+      } else {
+        existing.set(m.id, {
+          id: m.id, from: m.from_id, text: m.text,
+          timestamp: m.timestamp, out: m.from_id === state.userId, status,
+        });
+        changed = true;
+      }
+    });
+    if (changed) {
+      state.messages[contactId] = Array.from(existing.values()).sort((a, b) => a.timestamp - b.timestamp);
       store.set('messages', state.messages);
       if (state.activeContact === contactId) renderMessages(contactId);
+      renderContacts();
     }
   } catch {}
 }
@@ -463,8 +497,15 @@ function showTyping(fromId, fromName) {
 
 // --- Profile ---
 function openProfile() {
+  const saved = store.get('user') || {};
   document.getElementById('profile-display-name').value = state.displayName || '';
-  document.getElementById('profile-bio').value = store.get('user')?.bio || '';
+  document.getElementById('profile-username-show').value = state.username || '';
+  document.getElementById('profile-bio').value = saved.bio || '';
+  document.getElementById('profile-id-show').textContent = state.userId;
+  document.getElementById('old-password').value = '';
+  document.getElementById('new-password').value = '';
+  document.getElementById('new-password2').value = '';
+  document.getElementById('password-msg').textContent = '';
   renderColorSwatches();
   document.getElementById('modal-profile').classList.remove('hidden');
 }
@@ -473,15 +514,14 @@ function renderColorSwatches() {
   const wrap = document.getElementById('color-swatches');
   wrap.innerHTML = '';
   const preview = document.getElementById('profile-avatar-preview');
-  preview.style.background = state.avatarColor;
-  preview.textContent = (state.displayName || state.username || '?')[0].toUpperCase();
+  setAvatarEl(preview, state.displayName || state.username, state.avatarColor, state.avatar);
   COLORS.forEach(c => {
     const s = document.createElement('div');
     s.className = 'swatch' + (c === state.avatarColor ? ' selected' : '');
     s.style.background = c;
     s.addEventListener('click', () => {
       state.avatarColor = c;
-      preview.style.background = c;
+      if (!state.avatar) preview.style.background = c;
       wrap.querySelectorAll('.swatch').forEach(x => x.classList.remove('selected'));
       s.classList.add('selected');
     });
@@ -502,6 +542,73 @@ async function saveProfile() {
   store.set('user', { ...saved, displayName, avatarColor: state.avatarColor, bio });
   renderMe();
   document.getElementById('modal-profile').classList.add('hidden');
+}
+
+async function changePassword() {
+  const oldPw = document.getElementById('old-password').value;
+  const newPw = document.getElementById('new-password').value;
+  const newPw2 = document.getElementById('new-password2').value;
+  const msgEl = document.getElementById('password-msg');
+  msgEl.textContent = '';
+  msgEl.style.color = '#f87171';
+  if (!oldPw || !newPw) { msgEl.textContent = 'Заполните все поля'; return; }
+  if (newPw !== newPw2) { msgEl.textContent = 'Пароли не совпадают'; return; }
+  if (newPw.length < 4) { msgEl.textContent = 'Пароль слишком короткий'; return; }
+  try {
+    const res = await fetch(`${SERVER_URL}/password`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ id: state.userId, old_password: oldPw, new_password: newPw }),
+    });
+    const data = await res.json();
+    if (!res.ok) { msgEl.textContent = data.error || 'Ошибка'; return; }
+    msgEl.style.color = 'var(--online)';
+    msgEl.textContent = 'Пароль изменён';
+    document.getElementById('old-password').value = '';
+    document.getElementById('new-password').value = '';
+    document.getElementById('new-password2').value = '';
+  } catch { msgEl.textContent = 'Ошибка соединения'; }
+}
+
+async function uploadAvatar(file) {
+  const form = new FormData();
+  form.append('user_id', state.userId);
+  form.append('avatar', file);
+  try {
+    const res = await fetch(`${SERVER_URL}/avatar`, { method: 'POST', body: form });
+    const data = await res.json();
+    if (res.ok && data.avatar) {
+      state.avatar = data.avatar;
+      const saved = store.get('user') || {};
+      store.set('user', { ...saved, avatar: data.avatar });
+      renderMe();
+      renderColorSwatches();
+    }
+  } catch {}
+}
+
+async function openPeerProfile(contactId) {
+  try {
+    const res = await fetch(`${SERVER_URL}/user/${contactId}`);
+    if (!res.ok) return;
+    const u = await res.json();
+    const av = document.getElementById('peer-avatar');
+    setAvatarEl(av, u.display_name || u.username, u.avatar_color || '#6c63ff', u.avatar || '');
+    document.getElementById('peer-display-name').textContent = u.display_name || u.username;
+    document.getElementById('peer-username').textContent = '@' + u.username;
+    document.getElementById('peer-bio').textContent = u.bio || '';
+    document.getElementById('peer-lastseen').textContent = u.last_seen ? 'был(а) ' + fmtLastSeen(u.last_seen) : '';
+    document.getElementById('modal-peer-profile').classList.remove('hidden');
+  } catch {}
+}
+
+// Универсальная функция установки аватара
+function setAvatarEl(el, name, color, avatarData) {
+  el.style.background = color || '#6c63ff';
+  if (avatarData) {
+    el.innerHTML = `<img src="${avatarData}" alt="avatar"/>`;
+  } else {
+    el.textContent = (name || '?')[0].toUpperCase();
+  }
 }
 
 // --- Push ---
@@ -600,6 +707,32 @@ function bindEvents() {
   document.getElementById('btn-save-profile').addEventListener('click', saveProfile);
   document.getElementById('btn-close-profile').addEventListener('click', () => {
     document.getElementById('modal-profile').classList.add('hidden');
+  });
+  document.getElementById('btn-change-password').addEventListener('click', changePassword);
+  document.getElementById('btn-copy-id').addEventListener('click', () => {
+    navigator.clipboard.writeText(state.userId).then(() => {
+      const btn = document.getElementById('btn-copy-id');
+      btn.textContent = 'Скопировано!';
+      setTimeout(() => { btn.textContent = 'Копировать'; }, 1500);
+    });
+  });
+  // Аватар — клик на превью
+  document.getElementById('profile-avatar-preview').addEventListener('click', () => {
+    document.getElementById('avatar-file-input').click();
+  });
+  document.getElementById('avatar-file-input').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) uploadAvatar(file);
+  });
+  // Peer profile
+  document.getElementById('btn-close-peer-profile').addEventListener('click', () => {
+    document.getElementById('modal-peer-profile').classList.add('hidden');
+  });
+  document.getElementById('chat-peer-avatar').addEventListener('click', () => {
+    if (state.activeContact) openPeerProfile(state.activeContact);
+  });
+  document.getElementById('chat-peer-info-click').addEventListener('click', () => {
+    if (state.activeContact) openPeerProfile(state.activeContact);
   });
 }
 
