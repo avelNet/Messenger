@@ -1,6 +1,15 @@
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 
 pub async fn init(database_url: &str) -> SqlitePool {
+    // Создать файл БД если не существует
+    let path = database_url.trim_start_matches("sqlite://");
+    if let Some(parent) = std::path::Path::new(path).parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    if !std::path::Path::new(path).exists() {
+        std::fs::File::create(path).ok();
+    }
+
     let pool = SqlitePoolOptions::new()
         .max_connections(5)
         .connect(database_url)

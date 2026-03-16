@@ -10,5 +10,7 @@ RUN apt-get update && apt-get install -y ca-certificates libsqlite3-0 && rm -rf 
 WORKDIR /app
 COPY --from=builder /app/target/release/messenger-server .
 COPY messenger/client ./client
+RUN mkdir -p /data
+ENV DATABASE_URL=sqlite:///data/messenger.db
 EXPOSE 3000
 CMD ["./messenger-server"]
