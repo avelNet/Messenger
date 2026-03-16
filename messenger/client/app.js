@@ -222,8 +222,14 @@ function handleWsMessage(msg) {
     }
 
     case 'delivered':
-      // Заменяем tempId на реальный id чтобы read-события потом нашли сообщение
-      replaceTempId(msg.id);
+      // Добавляем исходящее сообщение в UI с реальным id
+      if (_pendingSend) {
+        const { to, text, timestamp } = _pendingSend;
+        _pendingSend = null;
+        pushMessage(to, { id: msg.id, from: state.userId, text, timestamp, out: true, status: 'delivered' });
+      } else {
+        updateMsgStatus(msg.id, 'delivered');
+      }
       break;
 
     case 'read':
@@ -266,8 +272,6 @@ function addIncoming(id, from, from_name, text, timestamp) {
 }
 
 // --- Send message ---
-// FIX: используем флаг чтобы избежать двойной отправки через Enter
-let _sending = false;
 function sendMessage() {
   if (_sending) return;
   const input = document.getElementById('msg-input');
@@ -275,15 +279,14 @@ function sendMessage() {
   if (!text || !state.activeContact || !state.wsReady) return;
   _sending = true;
   input.value = '';
-
-  // Генерируем tempId и сохраняем локально
-  const tempId = 'tmp_' + Date.now();
-  const timestamp = Math.floor(Date.now() / 1000);
-  pushMessage(state.activeContact, { id: tempId, from: state.userId, text, timestamp, out: true, status: 'sent' });
-
+  // Сохраняем pending чтобы при delivered добавить в UI
+  _pendingSend = { to: state.activeContact, text, timestamp: Math.floor(Date.now() / 1000) };
   state.ws.send(JSON.stringify({ type: 'send', to: state.activeContact, text }));
   setTimeout(() => { _sending = false; }, 100);
 }
+
+let _sending = false;
+let _pendingSend = null;
 
 let typingTimer = null;
 function onMsgInput() {
@@ -436,19 +439,6 @@ function updateMsgStatus(msgId, status) {
 
 // Заменяет первый tempId на реальный id и ставит статус delivered
 function replaceTempId(realId) {
-  for (const cid of Object.keys(state.messages)) {
-    const msgs = state.messages[cid];
-    // Ищем первое исходящее сообщение с tempId (строка начинается с tmp_)
-    const msg = msgs.find(m => m.out && String(m.id).startsWith('tmp_'));
-    if (msg) {
-      msg.id = realId;
-      msg.status = 'delivered';
-      store.set('messages', state.messages);
-      if (state.activeContact === cid) renderMessages(cid);
-      return;
-    }
-  }
-  // Если tempId не нашли — просто обновляем статус по реальному id
   updateMsgStatus(realId, 'delivered');
 }
 
@@ -500,12 +490,7 @@ async function loadHistory(contactId) {
     if (!res.ok) return;
     const msgs = await res.json();
 
-    // Строим map существующих по реальным id (не tempId)
-    const existing = new Map();
-    (state.messages[contactId] || []).forEach(m => {
-      if (!String(m.id).startsWith('tmp_')) existing.set(m.id, m);
-    });
-
+    const existing = new Map((state.messages[contactId] || []).map(m => [m.id, m]));
     let changed = false;
     msgs.forEach(m => {
       const status = m.read_at > 0 ? 'read' : (m.delivered > 0 ? 'delivered' : 'sent');
@@ -522,13 +507,7 @@ async function loadHistory(contactId) {
     });
 
     if (changed) {
-      // Сохраняем tempId сообщения которые ещё не пришли с сервера
-      const temps = (state.messages[contactId] || []).filter(m => String(m.id).startsWith('tmp_'));
-      const merged = Array.from(existing.values()).sort((a, b) => a.timestamp - b.timestamp);
-      // Убираем tempId если их текст уже есть в реальных сообщениях
-      const realTexts = new Set(merged.filter(m => m.out).map(m => m.text + '|' + m.timestamp));
-      const filteredTemps = temps.filter(t => !realTexts.has(t.text + '|' + t.timestamp));
-      state.messages[contactId] = [...merged, ...filteredTemps].sort((a, b) => a.timestamp - b.timestamp);
+      state.messages[contactId] = Array.from(existing.values()).sort((a, b) => a.timestamp - b.timestamp);
       store.set('messages', state.messages);
       if (state.activeContact === contactId) renderMessages(contactId);
       renderContacts();
