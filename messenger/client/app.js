@@ -236,6 +236,9 @@ function handleWsMessage(msg) {
       showTyping(msg.from, msg.from_name);
       break;
     }
+    case 'force_logout':
+      logout();
+      break;
     case 'presence': {
       const { user_id, online, last_seen } = msg;
       if (state.contacts[user_id]) {
@@ -271,49 +274,31 @@ function onMsgInput() {
 async function addContact() {
   const errEl = document.getElementById('add-error');
   errEl.textContent = '';
-  const activeStab = document.querySelector('.stab.active').dataset.stab;
-  let user = null;
-
-  if (activeStab === 'username') {
-    const username = document.getElementById('search-username-input').value.trim().replace(/^@/, '').toLowerCase();
-    if (!username) { errEl.textContent = 'Введите username'; return; }
-    try {
-      const res = await fetch(`${SERVER_URL}/username/${username}`);
-      if (!res.ok) throw new Error();
-      user = await res.json();
-    } catch { errEl.textContent = 'Пользователь не найден'; return; }
-  } else {
-    const id = document.getElementById('input-contact-id').value.trim().toLowerCase();
-    if (!id || id.length !== 8) { errEl.textContent = 'ID должен быть 8 символов'; return; }
-    try {
-      const res = await fetch(`${SERVER_URL}/user/${id}`);
-      if (!res.ok) throw new Error();
-      user = await res.json();
-    } catch { errEl.textContent = 'Пользователь не найден'; return; }
-  }
-
-  if (user.id === state.userId) { errEl.textContent = 'Нельзя добавить себя'; return; }
-  state.contacts[user.id] = {
-    id: user.id, username: user.username,
-    displayName: user.display_name || user.username,
-    avatarColor: user.avatar_color || '#6c63ff',
-    online: false, lastSeen: user.last_seen || 0,
-  };
-  saveContacts(); renderContacts(); closeModal();
+  const username = document.getElementById('search-username-input').value.trim().replace(/^@/, '').toLowerCase();
+  if (!username) { errEl.textContent = 'Введите username'; return; }
+  try {
+    const res = await fetch(`${SERVER_URL}/username/${username}`);
+    if (!res.ok) throw new Error();
+    const user = await res.json();
+    if (user.id === state.userId) { errEl.textContent = 'Нельзя добавить себя'; return; }
+    state.contacts[user.id] = {
+      id: user.id, username: user.username,
+      displayName: user.display_name || user.username,
+      avatarColor: user.avatar_color || '#6c63ff',
+      avatar: user.avatar || '',
+      online: false, lastSeen: user.last_seen || 0,
+    };
+    saveContacts(); renderContacts(); closeModal();
+  } catch { errEl.textContent = 'Пользователь не найден'; }
 }
 
+
 async function searchUserPreview() {
-  const activeStab = document.querySelector('.stab.active').dataset.stab;
   const preview = document.getElementById('found-user-preview');
   preview.classList.add('hidden');
   preview.innerHTML = '';
-
-  let username = '';
-  if (activeStab === 'username') {
-    username = document.getElementById('search-username-input').value.trim().replace(/^@/, '').toLowerCase();
-    if (username.length < 2) return;
-  } else return;
-
+  const username = document.getElementById('search-username-input').value.trim().replace(/^@/, '').toLowerCase();
+  if (username.length < 2) return;
   try {
     const res = await fetch(`${SERVER_URL}/username/${username}`);
     if (!res.ok) return;
@@ -621,7 +606,17 @@ function setAvatarEl(el, name, color, avatarData) {
   }
 }
 
-// --- Push ---
+function logout() {
+  if (state.ws) { try { state.ws.close(); } catch {} state.ws = null; }
+  state.userId = null; state.username = null; state.displayName = null;
+  state.avatarColor = '#6c63ff'; state.avatar = '';
+  state.contacts = {}; state.messages = {}; state.activeContact = null;
+  state.wsReady = false;
+  localStorage.removeItem('user');
+  localStorage.removeItem('contacts');
+  localStorage.removeItem('messages');
+  showAuth();
+}
 async function setupPush() {
   if (!('serviceWorker' in navigator) || VAPID_PUBLIC_KEY === 'YOUR_VAPID_PUBLIC_KEY') return;
   try {
@@ -646,7 +641,6 @@ function urlBase64ToUint8Array(b) {
 function openModal() {
   document.getElementById('modal-add').classList.remove('hidden');
   document.getElementById('search-username-input').value = '';
-  document.getElementById('input-contact-id').value = '';
   document.getElementById('add-error').textContent = '';
   document.getElementById('found-user-preview').classList.add('hidden');
   document.getElementById('search-username-input').focus();
@@ -692,18 +686,11 @@ function bindEvents() {
   // Add contact modal
   document.getElementById('btn-confirm-add').addEventListener('click', addContact);
   document.getElementById('btn-cancel-add').addEventListener('click', closeModal);
-  document.querySelectorAll('.stab').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.stab').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      document.getElementById('stab-username').classList.toggle('hidden', btn.dataset.stab !== 'username');
-      document.getElementById('stab-id').classList.toggle('hidden', btn.dataset.stab !== 'id');
-      document.getElementById('found-user-preview').classList.add('hidden');
-    });
-  });
   document.getElementById('search-username-input').addEventListener('input', searchUserPreview);
-  document.getElementById('search-username-input').addEventListener('keydown', e => { if (e.key === 'Enter') addContact(); });
-  document.getElementById('input-contact-id').addEventListener('keydown', e => { if (e.key === 'Enter') addContact(); });
+  document.getElementById('search-username-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') addContact();
+    if (e.key === 'Escape') closeModal();
+  });
 
   // Chat
   document.getElementById('btn-send').addEventListener('click', sendMessage);
@@ -719,6 +706,9 @@ function bindEvents() {
     document.getElementById('modal-profile').classList.add('hidden');
   });
   document.getElementById('btn-change-password').addEventListener('click', changePassword);
+  document.getElementById('btn-logout').addEventListener('click', () => {
+    if (confirm('Выйти из аккаунта?')) logout();
+  });
   document.getElementById('btn-copy-id').addEventListener('click', () => {
     navigator.clipboard.writeText(state.userId).then(() => {
       const btn = document.getElementById('btn-copy-id');

@@ -193,6 +193,7 @@ enum WsMsg {
     Authed { user_id: String, username: String, display_name: String, avatar_color: String },
     Presence { user_id: String, online: bool, last_seen: i64 },
     Error { message: String },
+    ForceLogout,
 }
 
 async fn ws_handler(ws: WebSocketUpgrade, State(s): State<AppState>) -> impl IntoResponse {
@@ -478,10 +479,11 @@ async fn admin_delete_user(
     Query(q): Query<AdminQuery>,
 ) -> StatusCode {
     if !check_admin_token(&q.token) { return StatusCode::UNAUTHORIZED; }
-    // Отключить если онлайн
+    // Отправить force logout и отключить
     if let Some(tx) = s.connections.get(&id) {
-        let _ = tx.send("__disconnect__".to_string());
+        let _ = tx.send(serde_json::to_string(&WsMsg::ForceLogout).unwrap());
     }
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     s.connections.remove(&id);
     match db::delete_user(&s.db, &id).await {
         Ok(_) => StatusCode::OK,
