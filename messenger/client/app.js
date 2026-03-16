@@ -184,8 +184,18 @@ function handleWsMessage(msg) {
     case 'authed':
       state.wsReady = true;
       setupPush();
-      // Загрузить историю для всех контактов
-      Object.keys(state.contacts).forEach(cid => loadHistory(cid));
+      // Загрузить историю и статусы для всех контактов
+      Object.keys(state.contacts).forEach(cid => {
+        loadHistory(cid);
+        // Запросить актуальный статус
+        fetch(`${SERVER_URL}/user/${cid}`).then(r => r.json()).then(u => {
+          if (state.contacts[cid]) {
+            state.contacts[cid].lastSeen = u.last_seen || 0;
+            saveContacts();
+            renderContacts();
+          }
+        }).catch(() => {});
+      });
       break;
     case 'incoming': {
       const { id, from, from_name, from_color, text, timestamp } = msg;
