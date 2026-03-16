@@ -390,6 +390,7 @@ tr:hover td{{background:#1a1a24}}
 .del-btn{{background:#3a1a1a;border:1px solid #5a2a2a;color:#f87171;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:.8rem}}
 .del-btn:hover{{background:#5a2a2a}}
 .online-dot{{display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;margin-right:6px}}
+.offline-dot{{display:inline-block;width:8px;height:8px;border-radius:50%;background:#555570;margin-right:6px}}
 </style>
 </head>
 <body>
@@ -414,7 +415,7 @@ async function load() {{
     <tr>
       <td><strong>${{esc(u.display_name)}}</strong><br><span style="color:#8888aa;font-size:.78rem">@${{esc(u.username)}}</span></td>
       <td><span class="badge">${{u.id}}</span></td>
-      <td>${{u.online ? '<span class="online-dot"></span>онлайн' : ''}}</td>
+      <td>${{u.online ? '<span class="online-dot"></span>онлайн' : '<span class="offline-dot"></span>оффлайн'}}</td>
       <td style="color:#8888aa">${{u.last_seen ? fmtDate(u.last_seen) : '—'}}</td>
       <td>${{u.msg_count}}</td>
       <td style="color:#8888aa">${{fmtDate(u.created_at)}}</td>
