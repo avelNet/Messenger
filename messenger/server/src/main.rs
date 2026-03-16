@@ -351,6 +351,142 @@ async fn send_push(db: &SqlitePool, user_id: &str, from_name: &str, text: &str) 
     }
 }
 
+fn check_admin_token(token: &str) -> bool {
+    let admin_token = std::env::var("ADMIN_TOKEN").unwrap_or_else(|_| "changeme".to_string());
+    !admin_token.is_empty() && token == admin_token
+}
+
+#[derive(Deserialize)]
+struct AdminQuery { token: String }
+
+async fn admin_page(Query(q): Query<AdminQuery>) -> impl IntoResponse {
+    if !check_admin_token(&q.token) {
+        return axum::response::Response::builder()
+            .status(StatusCode::UNAUTHORIZED)
+            .body(axum::body::Body::from("Unauthorized"))
+            .unwrap();
+    }
+    let token = q.token.clone();
+    let html = format!(r#"<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Admin Panel</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{font-family:-apple-system,sans-serif;background:#0a0a0f;color:#e2e8f0;padding:24px}}
+h1{{font-size:1.4rem;margin-bottom:20px;color:#a78bfa}}
+.stats{{display:flex;gap:16px;margin-bottom:24px}}
+.stat{{background:#1a1a24;border:1px solid #2a2a3a;border-radius:10px;padding:16px 24px;text-align:center}}
+.stat-val{{font-size:2rem;font-weight:700;color:#6c63ff}}
+.stat-label{{font-size:.8rem;color:#8888aa;margin-top:4px}}
+table{{width:100%;border-collapse:collapse;background:#111118;border-radius:10px;overflow:hidden}}
+th{{background:#1a1a24;padding:12px 16px;text-align:left;font-size:.8rem;color:#8888aa;font-weight:500}}
+td{{padding:11px 16px;border-top:1px solid #1a1a24;font-size:.85rem}}
+tr:hover td{{background:#1a1a24}}
+.badge{{background:#2d2060;color:#a78bfa;padding:2px 8px;border-radius:6px;font-size:.75rem;font-family:monospace}}
+.del-btn{{background:#3a1a1a;border:1px solid #5a2a2a;color:#f87171;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:.8rem}}
+.del-btn:hover{{background:#5a2a2a}}
+.online-dot{{display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;margin-right:6px}}
+</style>
+</head>
+<body>
+<h1>⚙ Admin Panel</h1>
+<div class="stats" id="stats">Загрузка...</div>
+<table>
+<thead><tr><th>Пользователь</th><th>ID</th><th>Онлайн</th><th>Последний вход</th><th>Сообщений</th><th>Регистрация</th><th></th></tr></thead>
+<tbody id="users-tbody">Загрузка...</tbody>
+</table>
+<script>
+const TOKEN = '{token}';
+async function load() {{
+  const res = await fetch('/admin/users?token=' + TOKEN);
+  const data = await res.json();
+  document.getElementById('stats').innerHTML = `
+    <div class="stat"><div class="stat-val">${{data.total_users}}</div><div class="stat-label">Пользователей</div></div>
+    <div class="stat"><div class="stat-val">${{data.total_messages}}</div><div class="stat-label">Сообщений</div></div>
+    <div class="stat"><div class="stat-val">${{data.online_now}}</div><div class="stat-label">Онлайн сейчас</div></div>
+  `;
+  const tbody = document.getElementById('users-tbody');
+  tbody.innerHTML = data.users.map(u => `
+    <tr>
+      <td><strong>${{esc(u.display_name)}}</strong><br><span style="color:#8888aa;font-size:.78rem">@${{esc(u.username)}}</span></td>
+      <td><span class="badge">${{u.id}}</span></td>
+      <td>${{u.online ? '<span class="online-dot"></span>онлайн' : ''}}</td>
+      <td style="color:#8888aa">${{u.last_seen ? fmtDate(u.last_seen) : '—'}}</td>
+      <td>${{u.msg_count}}</td>
+      <td style="color:#8888aa">${{fmtDate(u.created_at)}}</td>
+      <td><button class="del-btn" onclick="deleteUser('${{u.id}}','${{esc(u.username)}}')">Удалить</button></td>
+    </tr>
+  `).join('');
+}}
+async function deleteUser(id, username) {{
+  if (!confirm('Удалить @' + username + '? Все сообщения тоже удалятся.')) return;
+  await fetch('/admin/delete/' + id + '?token=' + TOKEN, {{method:'POST'}});
+  load();
+}}
+function fmtDate(ts) {{
+  return new Date(ts * 1000).toLocaleString('ru', {{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}});
+}}
+function esc(s) {{ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }}
+load();
+setInterval(load, 15000);
+</script>
+</body>
+</html>"#, token = token);
+
+    axum::response::Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "text/html; charset=utf-8")
+        .header("Cache-Control", "no-store")
+        .body(axum::body::Body::from(html))
+        .unwrap()
+}
+
+async fn admin_users(
+    State(s): State<AppState>,
+    Query(q): Query<AdminQuery>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    if !check_admin_token(&q.token) {
+        return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error":"Unauthorized"})));
+    }
+    let users = db::get_all_users(&s.db).await.unwrap_or_default();
+    let (total_users, total_messages) = db::get_stats(&s.db).await.unwrap_or((0, 0));
+    let online_now = s.connections.len() as i64;
+    let users_json: Vec<serde_json::Value> = users.iter().map(|u| {
+        let online = s.connections.contains_key(&u.id);
+        serde_json::json!({
+            "id": u.id, "username": u.username, "display_name": u.display_name,
+            "last_seen": u.last_seen, "created_at": u.created_at,
+            "msg_count": u.msg_count, "online": online,
+        })
+    }).collect();
+    (StatusCode::OK, Json(serde_json::json!({
+        "users": users_json,
+        "total_users": total_users,
+        "total_messages": total_messages,
+        "online_now": online_now,
+    })))
+}
+
+async fn admin_delete_user(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    Query(q): Query<AdminQuery>,
+) -> StatusCode {
+    if !check_admin_token(&q.token) { return StatusCode::UNAUTHORIZED; }
+    // Отключить если онлайн
+    if let Some(tx) = s.connections.get(&id) {
+        let _ = tx.send("__disconnect__".to_string());
+    }
+    s.connections.remove(&id);
+    match db::delete_user(&s.db, &id).await {
+        Ok(_) => StatusCode::OK,
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:///data/messenger.db".to_string());
@@ -367,6 +503,9 @@ async fn main() {
         .route("/avatar", post(upload_avatar))
         .route("/history/:user_id", get(history))
         .route("/push/subscribe", post(save_push_sub))
+        .route("/admin", get(admin_page))
+        .route("/admin/users", get(admin_users))
+        .route("/admin/delete/:id", post(admin_delete_user))
         .route("/ws", get(ws_handler))
         .nest_service("/", ServeDir::new("client"))
         .layer(CorsLayer::permissive())

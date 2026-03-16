@@ -171,3 +171,34 @@ pub async fn get_push_subscription(pool: &SqlitePool, user_id: &str) -> anyhow::
     Ok(sqlx::query_as("SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ?")
         .bind(user_id).fetch_optional(pool).await?)
 }
+
+#[derive(sqlx::FromRow, serde::Serialize)]
+pub struct UserStats {
+    pub id: String,
+    pub username: String,
+    pub display_name: String,
+    pub last_seen: i64,
+    pub created_at: i64,
+    pub msg_count: i64,
+}
+
+pub async fn get_all_users(pool: &SqlitePool) -> anyhow::Result<Vec<UserStats>> {
+    Ok(sqlx::query_as::<_, UserStats>(
+        "SELECT u.id, u.username, u.display_name, u.last_seen, u.created_at,
+         (SELECT COUNT(*) FROM messages WHERE from_id = u.id) as msg_count
+         FROM users u ORDER BY u.created_at DESC",
+    ).fetch_all(pool).await?)
+}
+
+pub async fn delete_user(pool: &SqlitePool, id: &str) -> anyhow::Result<()> {
+    sqlx::query("DELETE FROM messages WHERE from_id = ? OR to_id = ?").bind(id).bind(id).execute(pool).await?;
+    sqlx::query("DELETE FROM push_subscriptions WHERE user_id = ?").bind(id).execute(pool).await?;
+    sqlx::query("DELETE FROM users WHERE id = ?").bind(id).execute(pool).await?;
+    Ok(())
+}
+
+pub async fn get_stats(pool: &SqlitePool) -> anyhow::Result<(i64, i64)> {
+    let (users,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users").fetch_one(pool).await?;
+    let (msgs,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM messages").fetch_one(pool).await?;
+    Ok((users, msgs))
+}
