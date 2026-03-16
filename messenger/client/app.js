@@ -222,7 +222,8 @@ function handleWsMessage(msg) {
     }
 
     case 'delivered':
-      updateMsgStatus(msg.id, 'delivered');
+      // Заменяем tempId на реальный id чтобы read-события потом нашли сообщение
+      replaceTempId(msg.id);
       break;
 
     case 'read':
@@ -433,6 +434,24 @@ function updateMsgStatus(msgId, status) {
   }
 }
 
+// Заменяет первый tempId на реальный id и ставит статус delivered
+function replaceTempId(realId) {
+  for (const cid of Object.keys(state.messages)) {
+    const msgs = state.messages[cid];
+    // Ищем первое исходящее сообщение с tempId (строка начинается с tmp_)
+    const msg = msgs.find(m => m.out && String(m.id).startsWith('tmp_'));
+    if (msg) {
+      msg.id = realId;
+      msg.status = 'delivered';
+      store.set('messages', state.messages);
+      if (state.activeContact === cid) renderMessages(cid);
+      return;
+    }
+  }
+  // Если tempId не нашли — просто обновляем статус по реальному id
+  updateMsgStatus(realId, 'delivered');
+}
+
 function renderMessages(contactId) {
   const container = document.getElementById('messages');
   const msgs = state.messages[contactId] || [];
@@ -489,7 +508,7 @@ async function loadHistory(contactId) {
 
     let changed = false;
     msgs.forEach(m => {
-      const status = m.read_at > 0 ? 'read' : (m.delivered ? 'delivered' : 'sent');
+      const status = m.read_at > 0 ? 'read' : (m.delivered > 0 ? 'delivered' : 'sent');
       if (existing.has(m.id)) {
         const local = existing.get(m.id);
         if (local.status !== status) { local.status = status; changed = true; }
