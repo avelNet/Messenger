@@ -396,6 +396,7 @@ tr:hover td{{background:#1a1a24}}
 </head>
 <body>
 <h1>⚙ Admin Panel</h1>
+<div style="font-size:.75rem;color:#555570;margin-bottom:12px">Обновляется каждые 3 сек &nbsp;<span id="last-update"></span></div>
 <div class="stats" id="stats">Загрузка...</div>
 <table>
 <thead><tr><th>Пользователь</th><th>ID</th><th>Онлайн</th><th>Последний вход</th><th>Сообщений</th><th>Регистрация</th><th></th></tr></thead>
@@ -403,27 +404,6 @@ tr:hover td{{background:#1a1a24}}
 </table>
 <script>
 const TOKEN = '{token}';
-async function load() {{
-  const res = await fetch('/admin/users?token=' + TOKEN);
-  const data = await res.json();
-  document.getElementById('stats').innerHTML = `
-    <div class="stat"><div class="stat-val">${{data.total_users}}</div><div class="stat-label">Пользователей</div></div>
-    <div class="stat"><div class="stat-val">${{data.total_messages}}</div><div class="stat-label">Сообщений</div></div>
-    <div class="stat"><div class="stat-val">${{data.online_now}}</div><div class="stat-label">Онлайн сейчас</div></div>
-  `;
-  const tbody = document.getElementById('users-tbody');
-  tbody.innerHTML = data.users.map(u => `
-    <tr>
-      <td><strong>${{esc(u.display_name)}}</strong><br><span style="color:#8888aa;font-size:.78rem">@${{esc(u.username)}}</span></td>
-      <td><span class="badge">${{u.id}}</span></td>
-      <td>${{u.online ? '<span class="online-dot"></span>онлайн' : '<span class="offline-dot"></span>оффлайн'}}</td>
-      <td style="color:#8888aa">${{u.last_seen ? fmtDate(u.last_seen) : '—'}}</td>
-      <td>${{u.msg_count}}</td>
-      <td style="color:#8888aa">${{fmtDate(u.created_at)}}</td>
-      <td><button class="del-btn" onclick="deleteUser('${{u.id}}','${{esc(u.username)}}')">Удалить</button></td>
-    </tr>
-  `).join('');
-}}
 async function deleteUser(id, username) {{
   if (!confirm('Удалить @' + username + '? Все сообщения тоже удалятся.')) return;
   await fetch('/admin/delete/' + id + '?token=' + TOKEN, {{method:'POST'}});
@@ -433,8 +413,34 @@ function fmtDate(ts) {{
   return new Date(ts * 1000).toLocaleString('ru', {{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}});
 }}
 function esc(s) {{ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }}
+async function load() {{
+  try {{
+    const res = await fetch('/admin/users?token=' + TOKEN);
+    const data = await res.json();
+    document.getElementById('stats').innerHTML = `
+      <div class="stat"><div class="stat-val">${{data.total_users}}</div><div class="stat-label">Пользователей</div></div>
+      <div class="stat"><div class="stat-val">${{data.total_messages}}</div><div class="stat-label">Сообщений</div></div>
+      <div class="stat"><div class="stat-val">${{data.online_now}}</div><div class="stat-label">Онлайн сейчас</div></div>
+    `;
+    const tbody = document.getElementById('users-tbody');
+    tbody.innerHTML = data.users.map(u => `
+      <tr>
+        <td><strong>${{esc(u.display_name)}}</strong><br><span style="color:#8888aa;font-size:.78rem">@${{esc(u.username)}}</span></td>
+        <td><span class="badge">${{u.id}}</span></td>
+        <td>${{u.online ? '<span class="online-dot"></span>онлайн' : '<span class="offline-dot"></span>оффлайн'}}</td>
+        <td style="color:#8888aa">${{u.last_seen ? fmtDate(u.last_seen) : '—'}}</td>
+        <td>${{u.msg_count}}</td>
+        <td style="color:#8888aa">${{fmtDate(u.created_at)}}</td>
+        <td><button class="del-btn" onclick="deleteUser('${{u.id}}','${{esc(u.username)}}')">Удалить</button></td>
+      </tr>
+    `).join('');
+    document.getElementById('last-update').textContent = 'обновлено в ' + new Date().toLocaleTimeString('ru');
+  }} catch(e) {{
+    document.getElementById('last-update').textContent = '⚠ ошибка соединения';
+  }}
+}}
 load();
-setInterval(load, 15000);
+setInterval(load, 3000);
 </script>
 </body>
 </html>"#, token = token);
