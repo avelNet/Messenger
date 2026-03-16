@@ -10,7 +10,7 @@ const store = {
 
 let state = {
   userId: null, username: null, displayName: null, avatarColor: '#6c63ff', avatar: '',
-  contacts: {}, messages: {}, activeContact: null, ws: null, wsReady: false,
+  contacts: {}, messages: {}, unread: {}, activeContact: null, ws: null, wsReady: false,
   typingTimers: {}, pendingRegData: null,
 };
 
@@ -25,6 +25,7 @@ window.addEventListener('DOMContentLoaded', () => {
     state.avatar = saved.avatar || '';
     state.contacts = store.get('contacts') || {};
     state.messages = store.get('messages') || {};
+    state.unread = store.get('unread') || {};
     showMain();
     connectWs();
   } else {
@@ -108,7 +109,6 @@ async function doRegisterStep2() {
     });
     const data = await res.json();
     if (!res.ok) { errEl.textContent = data.error === 'Username taken' ? 'Username занят' : (data.error || 'Ошибка'); return; }
-    // Сохранить display_name через profile update
     await fetch(`${SERVER_URL}/profile`, {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ id: data.id, display_name: displayName, bio: '', avatar_color: '#6c63ff' }),
@@ -184,66 +184,64 @@ function handleWsMessage(msg) {
     case 'authed':
       state.wsReady = true;
       setupPush();
-      // Загрузить историю и статусы для всех контактов
       Object.keys(state.contacts).forEach(cid => {
         loadHistory(cid);
-        // Запросить актуальный статус
         fetch(`${SERVER_URL}/user/${cid}`).then(r => r.json()).then(u => {
           if (state.contacts[cid]) {
             state.contacts[cid].lastSeen = u.last_seen || 0;
             saveContacts();
             renderContacts();
+            if (state.activeContact === cid) updateChatStatus(cid);
           }
         }).catch(() => {});
       });
       break;
+
     case 'incoming': {
       const { id, from, from_name, from_color, text, timestamp } = msg;
-      if (!state.contacts[from]) {
-        // Загрузить полный профиль
-        fetch(`${SERVER_URL}/user/${from}`).then(r => r.json()).then(u => {
+      const ensureContact = (u) => {
+        if (!state.contacts[from]) {
           state.contacts[from] = {
-            id: from, username: u.username,
-            displayName: u.display_name || from_name,
-            avatarColor: u.avatar_color || from_color || '#6c63ff',
-            avatar: u.avatar || '',
-            online: true,
+            id: from, username: u?.username || '',
+            displayName: u?.display_name || from_name,
+            avatarColor: u?.avatar_color || from_color || '#6c63ff',
+            avatar: u?.avatar || '', online: true, lastSeen: 0,
           };
           saveContacts(); renderContacts();
-        }).catch(() => {
-          state.contacts[from] = { id: from, username: '', displayName: from_name, avatarColor: from_color || '#6c63ff', avatar: '', online: true };
-          saveContacts(); renderContacts();
-        });
-      }
-      pushMessage(from, { id, from, text, timestamp, out: false, status: 'delivered' });
-      // Отправить read если чат открыт
-      if (state.activeContact === from && state.wsReady) {
-        state.ws.send(JSON.stringify({ type: 'mark_read', from }));
+        }
+      };
+      if (!state.contacts[from]) {
+        fetch(`${SERVER_URL}/user/${from}`).then(r => r.json()).then(u => {
+          ensureContact(u);
+          addIncoming(id, from, from_name, text, timestamp);
+        }).catch(() => { ensureContact(null); addIncoming(id, from, from_name, text, timestamp); });
       } else {
-        notifyContact(from, from_name, text);
+        addIncoming(id, from, from_name, text, timestamp);
       }
       break;
     }
-    case 'delivered': {
+
+    case 'delivered':
       updateMsgStatus(msg.id, 'delivered');
       break;
-    }
-    case 'read': {
+
+    case 'read':
       msg.msg_ids.forEach(id => updateMsgStatus(id, 'read'));
       break;
-    }
-    case 'typing_indicator': {
+
+    case 'typing_indicator':
       showTyping(msg.from, msg.from_name);
       break;
-    }
+
     case 'force_logout':
       logout();
       break;
+
     case 'presence': {
       const { user_id, online, last_seen } = msg;
       if (state.contacts[user_id]) {
         state.contacts[user_id].online = online;
-        state.contacts[user_id].lastSeen = last_seen;
+        if (!online && last_seen) state.contacts[user_id].lastSeen = last_seen;
         saveContacts(); renderContacts();
         if (state.activeContact === user_id) updateChatStatus(user_id);
       }
@@ -252,22 +250,47 @@ function handleWsMessage(msg) {
   }
 }
 
+function addIncoming(id, from, from_name, text, timestamp) {
+  pushMessage(from, { id, from, text, timestamp, out: false, status: 'delivered' });
+  if (state.activeContact === from && state.wsReady) {
+    // Чат открыт — сразу отмечаем прочитанным
+    state.ws.send(JSON.stringify({ type: 'mark_read', from }));
+  } else {
+    // Чат не открыт — увеличиваем счётчик непрочитанных
+    state.unread[from] = (state.unread[from] || 0) + 1;
+    store.set('unread', state.unread);
+    renderContacts();
+    notifyContact(from, from_name, text);
+  }
+}
+
+// --- Send message ---
+// FIX: используем флаг чтобы избежать двойной отправки через Enter
+let _sending = false;
 function sendMessage() {
+  if (_sending) return;
   const input = document.getElementById('msg-input');
   const text = input.value.trim();
   if (!text || !state.activeContact || !state.wsReady) return;
-  state.ws.send(JSON.stringify({ type: 'send', to: state.activeContact, text }));
-  const timestamp = Math.floor(Date.now() / 1000);
-  const tempId = Date.now();
-  pushMessage(state.activeContact, { id: tempId, from: state.userId, text, timestamp, out: true, status: 'sent' });
+  _sending = true;
   input.value = '';
+
+  // Генерируем tempId и сохраняем локально
+  const tempId = 'tmp_' + Date.now();
+  const timestamp = Math.floor(Date.now() / 1000);
+  pushMessage(state.activeContact, { id: tempId, from: state.userId, text, timestamp, out: true, status: 'sent' });
+
+  state.ws.send(JSON.stringify({ type: 'send', to: state.activeContact, text }));
+  setTimeout(() => { _sending = false; }, 100);
 }
 
 let typingTimer = null;
 function onMsgInput() {
   if (!state.activeContact || !state.wsReady) return;
-  state.ws.send(JSON.stringify({ type: 'typing', to: state.activeContact }));
   clearTimeout(typingTimer);
+  typingTimer = setTimeout(() => {
+    state.ws.send(JSON.stringify({ type: 'typing', to: state.activeContact }));
+  }, 300);
 }
 
 // --- Contacts ---
@@ -291,7 +314,6 @@ async function addContact() {
     saveContacts(); renderContacts(); closeModal();
   } catch { errEl.textContent = 'Пользователь не найден'; }
 }
-
 
 async function searchUserPreview() {
   const preview = document.getElementById('found-user-preview');
@@ -320,12 +342,13 @@ function renderContacts() {
   list.innerHTML = '';
   const contacts = Object.values(state.contacts);
   if (!contacts.length) {
-    list.innerHTML = '<p style="padding:16px;color:var(--text3);font-size:.82rem;text-align:center">Нет контактов.<br>Нажмите + чтобы добавить.</p>';
+    list.innerHTML = '<p style="padding:16px;color:var(--text3);font-size:.82rem;text-align:center">Нет контактов.<br>Нажмите 🔍 чтобы добавить.</p>';
     return;
   }
   contacts.forEach(c => {
     const msgs = state.messages[c.id] || [];
     const last = msgs[msgs.length - 1];
+    const unreadCount = state.unread[c.id] || 0;
     const el = document.createElement('div');
     el.className = 'contact-item' + (state.activeContact === c.id ? ' active' : '');
     el.innerHTML = `
@@ -339,6 +362,7 @@ function renderContacts() {
       </div>
       <div class="contact-meta">
         ${last ? `<span class="contact-time">${fmtTime(last.timestamp)}</span>` : ''}
+        ${unreadCount > 0 ? `<span class="unread-badge">${unreadCount}</span>` : ''}
       </div>`;
     el.addEventListener('click', () => openChat(c.id));
     list.appendChild(el);
@@ -347,6 +371,11 @@ function renderContacts() {
 
 function openChat(contactId) {
   state.activeContact = contactId;
+  // Сбросить непрочитанные
+  if (state.unread[contactId]) {
+    delete state.unread[contactId];
+    store.set('unread', state.unread);
+  }
   const c = state.contacts[contactId];
   document.getElementById('chat-title').textContent = c.displayName || c.username;
   updateChatStatus(contactId);
@@ -368,6 +397,7 @@ function updateChatStatus(contactId) {
   const c = state.contacts[contactId];
   if (!c) return;
   const el = document.getElementById('chat-status');
+  if (!el) return;
   if (c.online) {
     el.textContent = 'в сети';
     el.className = 'chat-status online';
@@ -383,6 +413,7 @@ function updateChatStatus(contactId) {
 // --- Messages ---
 function pushMessage(contactId, msg) {
   if (!state.messages[contactId]) state.messages[contactId] = [];
+  // Дедупликация: не добавлять если уже есть такой id (включая tempId)
   if (msg.id && state.messages[contactId].some(m => m.id === msg.id)) return;
   state.messages[contactId].push(msg);
   store.set('messages', state.messages);
@@ -449,12 +480,17 @@ async function loadHistory(contactId) {
     const res = await fetch(`${SERVER_URL}/history/${state.userId}?with=${contactId}`);
     if (!res.ok) return;
     const msgs = await res.json();
-    const existing = new Map((state.messages[contactId] || []).map(m => [m.id, m]));
+
+    // Строим map существующих по реальным id (не tempId)
+    const existing = new Map();
+    (state.messages[contactId] || []).forEach(m => {
+      if (!String(m.id).startsWith('tmp_')) existing.set(m.id, m);
+    });
+
     let changed = false;
     msgs.forEach(m => {
       const status = m.read_at > 0 ? 'read' : (m.delivered ? 'delivered' : 'sent');
       if (existing.has(m.id)) {
-        // Обновить статус если изменился
         const local = existing.get(m.id);
         if (local.status !== status) { local.status = status; changed = true; }
       } else {
@@ -465,8 +501,15 @@ async function loadHistory(contactId) {
         changed = true;
       }
     });
+
     if (changed) {
-      state.messages[contactId] = Array.from(existing.values()).sort((a, b) => a.timestamp - b.timestamp);
+      // Сохраняем tempId сообщения которые ещё не пришли с сервера
+      const temps = (state.messages[contactId] || []).filter(m => String(m.id).startsWith('tmp_'));
+      const merged = Array.from(existing.values()).sort((a, b) => a.timestamp - b.timestamp);
+      // Убираем tempId если их текст уже есть в реальных сообщениях
+      const realTexts = new Set(merged.filter(m => m.out).map(m => m.text + '|' + m.timestamp));
+      const filteredTemps = temps.filter(t => !realTexts.has(t.text + '|' + t.timestamp));
+      state.messages[contactId] = [...merged, ...filteredTemps].sort((a, b) => a.timestamp - b.timestamp);
       store.set('messages', state.messages);
       if (state.activeContact === contactId) renderMessages(contactId);
       renderContacts();
@@ -583,20 +626,35 @@ async function uploadAvatar(file) {
 
 async function openPeerProfile(contactId) {
   try {
+    // Всегда берём свежие данные с сервера
     const res = await fetch(`${SERVER_URL}/user/${contactId}`);
     if (!res.ok) return;
     const u = await res.json();
+    // Обновляем локальный контакт тоже
+    if (state.contacts[contactId]) {
+      state.contacts[contactId].lastSeen = u.last_seen || 0;
+      state.contacts[contactId].displayName = u.display_name || u.username;
+      state.contacts[contactId].avatarColor = u.avatar_color || '#6c63ff';
+      state.contacts[contactId].avatar = u.avatar || '';
+      saveContacts();
+      if (state.activeContact === contactId) updateChatStatus(contactId);
+    }
     const av = document.getElementById('peer-avatar');
     setAvatarEl(av, u.display_name || u.username, u.avatar_color || '#6c63ff', u.avatar || '');
     document.getElementById('peer-display-name').textContent = u.display_name || u.username;
     document.getElementById('peer-username').textContent = '@' + u.username;
     document.getElementById('peer-bio').textContent = u.bio || '';
-    document.getElementById('peer-lastseen').textContent = u.last_seen ? 'был(а) ' + fmtLastSeen(u.last_seen) : '';
+    // Статус: онлайн или last_seen
+    const c = state.contacts[contactId];
+    const isOnline = c?.online || false;
+    document.getElementById('peer-lastseen').textContent = isOnline
+      ? 'в сети'
+      : (u.last_seen ? 'был(а) ' + fmtLastSeen(u.last_seen) : '');
+    document.getElementById('peer-lastseen').style.color = isOnline ? 'var(--online)' : '';
     document.getElementById('modal-peer-profile').classList.remove('hidden');
   } catch {}
 }
 
-// Универсальная функция установки аватара
 function setAvatarEl(el, name, color, avatarData) {
   el.style.background = color || '#6c63ff';
   if (avatarData) {
@@ -610,13 +668,15 @@ function logout() {
   if (state.ws) { try { state.ws.close(); } catch {} state.ws = null; }
   state.userId = null; state.username = null; state.displayName = null;
   state.avatarColor = '#6c63ff'; state.avatar = '';
-  state.contacts = {}; state.messages = {}; state.activeContact = null;
+  state.contacts = {}; state.messages = {}; state.unread = {}; state.activeContact = null;
   state.wsReady = false;
   localStorage.removeItem('user');
   localStorage.removeItem('contacts');
   localStorage.removeItem('messages');
+  localStorage.removeItem('unread');
   showAuth();
 }
+
 async function setupPush() {
   if (!('serviceWorker' in navigator) || VAPID_PUBLIC_KEY === 'YOUR_VAPID_PUBLIC_KEY') return;
   try {
@@ -649,7 +709,6 @@ function closeModal() { document.getElementById('modal-add').classList.add('hidd
 
 // --- Events ---
 function bindEvents() {
-  // Auth tabs
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -666,12 +725,12 @@ function bindEvents() {
   document.getElementById('btn-register').addEventListener('click', doRegisterStep1);
   document.getElementById('reg-password').addEventListener('keydown', e => { if (e.key === 'Enter') doRegisterStep1(); });
 
-  // Username setup
   document.getElementById('setup-username').addEventListener('input', onUsernameInput);
-  document.getElementById('setup-username').addEventListener('keydown', e => { if (e.key === 'Enter' && !document.getElementById('btn-confirm-username').disabled) doRegisterStep2(); });
+  document.getElementById('setup-username').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !document.getElementById('btn-confirm-username').disabled) doRegisterStep2();
+  });
   document.getElementById('btn-confirm-username').addEventListener('click', doRegisterStep2);
 
-  // Main
   document.getElementById('btn-add').addEventListener('click', openModal);
   document.getElementById('btn-profile').addEventListener('click', openProfile);
   document.getElementById('my-id').addEventListener('click', () => {
@@ -683,7 +742,6 @@ function bindEvents() {
     });
   });
 
-  // Add contact modal
   document.getElementById('btn-confirm-add').addEventListener('click', addContact);
   document.getElementById('btn-cancel-add').addEventListener('click', closeModal);
   document.getElementById('search-username-input').addEventListener('input', searchUserPreview);
@@ -692,15 +750,20 @@ function bindEvents() {
     if (e.key === 'Escape') closeModal();
   });
 
-  // Chat
+  // FIX: используем keydown с preventDefault чтобы Enter не вызывал input event
   document.getElementById('btn-send').addEventListener('click', sendMessage);
-  document.getElementById('msg-input').addEventListener('keydown', e => { if (e.key === 'Enter') sendMessage(); });
+  document.getElementById('msg-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      sendMessage();
+    }
+  });
   document.getElementById('msg-input').addEventListener('input', onMsgInput);
+
   document.getElementById('btn-back').addEventListener('click', () => {
     document.getElementById('sidebar').classList.remove('slide-out');
   });
 
-  // Profile modal
   document.getElementById('btn-save-profile').addEventListener('click', saveProfile);
   document.getElementById('btn-close-profile').addEventListener('click', () => {
     document.getElementById('modal-profile').classList.add('hidden');
@@ -716,7 +779,6 @@ function bindEvents() {
       setTimeout(() => { btn.textContent = 'Копировать'; }, 1500);
     });
   });
-  // Аватар — клик на превью
   document.getElementById('profile-avatar-preview').addEventListener('click', () => {
     document.getElementById('avatar-file-input').click();
   });
@@ -724,7 +786,6 @@ function bindEvents() {
     const file = e.target.files[0];
     if (file) uploadAvatar(file);
   });
-  // Peer profile
   document.getElementById('btn-close-peer-profile').addEventListener('click', () => {
     document.getElementById('modal-peer-profile').classList.add('hidden');
   });
