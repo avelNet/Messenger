@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#1a1a2e" />
+  <title>Messenger</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- Экран регистрации -->
+<div id="screen-auth" class="screen">
+  <div class="auth-box">
+    <h1>Messenger</h1>
+    <p class="subtitle">Локальный мессенджер</p>
+    <input id="input-username" type="text" placeholder="Ваше имя" maxlength="32" />
+    <button id="btn-register">Войти / Зарегистрироваться</button>
+    <p id="auth-error" class="error"></p>
+  </div>
+</div>
+
+<!-- Основной экран -->
+<div id="screen-main" class="screen hidden">
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <div class="my-info">
+        <span id="my-username"></span>
+        <span class="my-id-label">Ваш ID: <strong id="my-id"></strong></span>
+      </div>
+      <button id="btn-add-contact" title="Добавить контакт">+</button>
+    </div>
+    <div id="contacts-list" class="contacts-list"></div>
+  </div>
+
+  <div class="chat-area">
+    <div id="chat-header" class="chat-header">
+      <span id="chat-title">Выберите контакт</span>
+      <span id="chat-status"></span>
+    </div>
+    <div id="messages" class="messages"></div>
+    <div class="input-area">
+      <input id="msg-input" type="text" placeholder="Сообщение..." disabled />
+      <button id="btn-send" disabled>→</button>
+    </div>
+  </div>
+</div>
+
+<!-- Модалка добавления контакта -->
+<div id="modal-add" class="modal hidden">
+  <div class="modal-box">
+    <h3>Добавить контакт</h3>
+    <input id="input-contact-id" type="text" placeholder="ID пользователя" maxlength="8" />
+    <div class="modal-buttons">
+      <button id="btn-confirm-add">Добавить</button>
+      <button id="btn-cancel-add" class="secondary">Отмена</button>
+    </div>
+    <p id="add-error" class="error"></p>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
+""
